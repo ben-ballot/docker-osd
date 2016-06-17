@@ -1,0 +1,89 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+
+SERVERS = [
+    { :name => 'centos6-supervisor', :ip => '172.16.69.10', :box => 'chef/centos-6.6', :sup_ip => '172.16.69.10'  },
+    { :name => 'centos6-connectors-1', :ip => '172.16.69.11', :box => 'chef/centos-6.6', :sup_ip => '172.16.69.10'  },
+    { :name => 'centos6-nodes-1', :ip => '172.16.69.12', :box => 'chef/centos-6.6', :sup_ip => '172.16.69.10'  },
+    { :name => 'trusty-supervisor', :ip => '172.16.69.20', :box => 'trusty', :sup_ip => '172.16.69.20' },
+    { :name => 'trusty-connectors-1', :ip => '172.16.69.21', :box => 'trusty', :sup_ip => '172.16.69.20' },
+    { :name => 'trusty-nodes-1', :ip => '172.16.69.22', :box => 'trusty', :sup_ip => '172.16.69.20'},
+    { :name => 'centos7-supervisor', :ip => '172.16.69.30', :box => 'chef/centos-7.1', :sup_ip => '172.16.69.30' },
+    { :name => 'centos7-nodes-1', :ip => '172.16.69.31', :box => 'chef/centos-7.1', :sup_ip => '172.16.69.30' },
+    { :name => 'centos7-connectors-1', :ip => '172.16.69.32', :box => 'chef/centos-7.1', :sup_ip => '172.16.69.30' }
+]
+
+DISKS = [
+    { :id => 1, :path => 'disk01.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 2, :path => 'disk02.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 3, :path => 'disk03.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 4, :path => 'disk04.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 5, :path => 'disk05.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 6, :path => 'disk06.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 7, :path => 'disk07.vmdk', :ssd => 'on', :size => 1024 },
+    { :id => 8, :path => 'disk08.vmdk', :ssd => 'on', :size => 1024 }
+]
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.synced_folder "shared", "/srv"
+  config.vm.box = "noop_trusty"
+  if Vagrant.has_plugin?("vagrant-proxyconf")
+    config.apt_proxy.http = "http://192.168.46.1:3142"
+  end
+  config.ssh.insert_key = false
+  config.vm.define "sup" do |sup|
+    sup.vm.hostname = "sup"
+    sup.vm.network :private_network, ip: "192.168.46.2"
+    sup.vm.provider :virtualbox do |vb|
+      vb.memory = 4096
+      vb.cpus = 2
+    end
+    sup.vm.provision :salt do |salt|
+      salt.run_highstate = false
+      salt.install_type = "stable"
+      salt.verbose = true
+      salt.always_install = true
+      salt.install_master = true
+      salt.bootstrap_options = "-F -M -D -i sup -A 192.168.46.2 -P"
+    end
+  end
+
+
+  (1..4).each do |i|
+    config.vm.define "server#{i}" do |server|
+      server.vm.provider :virtualbox do |vb|
+        vb.memory = 4096
+        vb.cpus = 2
+        # Create needed disks
+        disks = []
+        diskspath = "disk-%02d-%02d.vmdk"
+        (1..6).each do |n|
+          disks << { :id => n, :path => diskspath % [i, n], :ssd => 'off', :size => 10240 }
+        end
+        (7..8).each do |n|
+          disks << { :id => n, :path => diskspath % [i, n], :ssd => 'on', :size => 10240 }
+        end
+        #(9..10).each do |n|
+        #  disks << { :id => n, :path => diskspath % [i, n], :ssd => 'on', :size => 1023 }
+        #end
+
+        disks.each do |disk|
+          vb.customize ['createhd', '--filename', disk[:path], '--size', disk[:size]]
+          vb.customize ['storageattach', :id, '--storagectl', 'SATA', '--port', disk[:id], '--device', 0, '--type', 'hdd', '--medium', disk[:path], '--nonrotational', disk[:ssd]]
+        end
+      end
+      server.vm.hostname = "server#{i}"
+      server.vm.network :private_network, ip: "192.168.46.#{i+2}"
+      server.vm.provision :salt do |salt|
+        salt.run_highstate = false
+        salt.install_type = "stable"
+        salt.verbose = true
+	salt.always_install = true
+        salt.bootstrap_options = "-F -D -i server#{i} -A 192.168.46.2 -P"
+      end
+    end
+  end
+end

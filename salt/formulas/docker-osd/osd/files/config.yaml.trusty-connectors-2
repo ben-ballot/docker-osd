@@ -1,0 +1,11 @@
+---
+osd:
+  cluster:
+    nodeid: "4"
+    clusterid: "deadbeeef"
+  drivers:
+    nfs:
+      server: "172.16.70.20"
+      path: "/docker"
+  graphdrivers:
+    chainfs:

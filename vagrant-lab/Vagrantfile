@@ -1,0 +1,73 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+require_relative 'servers_config.rb'
+
+Vagrant.configure("2") do |config|
+    SERVERS.each do |server|
+	# Modify "aptcacher" with the ip of your cacher or proxy	
+	if Vagrant.has_plugin?("vagrant-proxyconf")
+		config.yum_proxy.http = ""
+	end
+        os_release = server[:name].gsub(/(\w+)-.+/,'\1')
+        config.vm.define server[:name] do |srv|
+            if server[:box]
+                srv.vm.box = server[:box]
+            end
+            srv.vm.hostname = server[:name]
+            srv.vm.network "private_network", ip: server[:ip]
+            if server[:name] == "centos6-supervisor"
+                srv.vm.network "forwarded_port", guest: 3080, host: 4280 
+            elsif server[:name] == "trusty-supervisor"
+                    srv.vm.network "forwarded_port", guest: 3080, host: 4281 
+            elsif server[:name] == "centos7-supervisor"
+                srv.vm.network "forwarded_port", guest: 3080, host: 4282 
+            end
+            srv.vm.provider :virtualbox do |vb|
+                vb.cpus = 2
+		vb.customize ["modifyvm", :id, "--nictype1", "virtio" ]
+		vb.customize ["modifyvm", :id, "--nictype2", "virtio" ]
+                if server[:name] =~ /store/
+                    vb.memory = 6144
+                    #unless File.exist?('disks/' + server[:name] + 'disk01.vmdk')
+                    #    if os_release == "centos6"
+                    #        vb.customize ["storagectl", :id, "--name", "SATA Controller", "--add", "sata", "--controller", "IntelAHCI" ]
+                    #    end
+                    #end
+                    if os_release =~ /centos6/
+                        sata_ctrl="SATA Controller"
+                    else
+                        sata_ctrl="SATAController"
+                    end
+                    DISKS.each do |disk|
+                            vb.customize ['createhd', '--filename', 'disks/' + server[:name] + disk[:path], '--size', disk[:size]]
+                            vb.customize ['storageattach', :id, 
+                                          '--storagectl', sata_ctrl, 
+                                          '--port', disk[:id], 
+                                          '--device', 0, 
+                                          '--type', 'hdd', 
+                                          '--medium', 'disks/' + server[:name] + disk[:path],
+					  '--nonrotational', disk[:ssd]]
+                        end
+                else
+                    vb.memory = 6144
+                end
+            end
+            srv.vm.provision :salt do |salt|
+                if server[:name] =~ /supervisor/
+                    preseed_keys = {}
+                    salt.install_master = true
+                end
+                salt.bootstrap_options = "-D -i #{server[:name]} -A #{server[:sup_ip]} -P"
+                #salt.install_type = "stable"
+                salt.install_type = "git v2015.5.6"
+                salt.always_install = true
+                salt.verbose = true
+                salt.run_highstate = false
+            end
+       end
+    home=ENV['HOME']
+    shared=home + '/shared'
+    config.vm.synced_folder shared, "/shared"
+   end
+end
